@@ -3,14 +3,16 @@
 // HTPWatchProducts - Page de gestion des produits surveillés
 // Dolibarr 23.0.2 - NAS Synology DS418
 // ==================================================================
-
+// Version: 20260522 Build: 2500
+// Fichier: /volume1/web/dolibarr_test/htdocs/custom/htpwatchproducts/admin/products.php
+// ==================================================================
 
 $PATHFILE = '/volume1/web/dolibarr_test/htdocs/custom/htpwatchproducts/admin/products.php';
-$VERSION  = '20260521';
-$BUILD    = '1800';
+$VERSION  = '20260522';
+$BUILD    = '1709';
 $DEBUG_LIGHT  = true;
 $DEBUG_ERRORS = false;
-$DEBUG_DEV    = false;  // ← Pour afficher le bandeau info développeur si besoin
+$DEBUG_DEV    = false;
 
 if ($DEBUG_ERRORS) {
     error_reporting(E_ALL);
@@ -31,7 +33,7 @@ if (file_exists(__DIR__.'/../lib/htpwatchproducts.lib.php')) {
 global $db, $conf, $user, $langs;
 
 // =================================================================
-// 🔍 DEBUG HEADER (AVANT llxHeader)
+// 🔍 DEBUG HEADER
 // =================================================================
 if ($DEBUG_LIGHT) {
     print '<div style="position:fixed;top:0;left:0;width:100%;z-index:9999;background:#e7f3ff;padding:6px;border-bottom:2px solid #007bff;font-family:monospace;font-size:11px;color:#000;">';
@@ -51,13 +53,11 @@ llxHeader('', 'HTP Watch Products - Produits surveillés');
 $action = GETPOST('action', 'alpha');
 $token  = GETPOST('token', 'alpha');
 
-// Message de retour
 $message = '';
 $message_type = '';
 $test_price = null;
 $test_result = null;
 
-// ✅ VÉRIFICATION CSRF (compatible Dolibarr 23)
 $csrf_ok = (!empty($token) && $token === ($_SESSION['newtoken'] ?? ''));
 
 // =================================================================
@@ -94,7 +94,6 @@ if ($action == 'add_product' && $csrf_ok) {
     $rowid = htpwatchproducts_add_product($db, $label, $url, $supplier, $user);
     
     if ($rowid > 0) {
-        // ✅ RÉCUPÉRATION AUTO DU PRIX
         $result = htpwatchproducts_refresh_price($db, $rowid, false);
         if ($result['success']) {
             $message = '✅ Produit "'.$label.'" ajouté avec succès (ID: '.$rowid.') - Prix: '.$result['price'].' €';
@@ -111,7 +110,7 @@ if ($action == 'add_product' && $csrf_ok) {
     }
 }
 
-// 🔄 ACTUALISER PRIX (ligne unique)
+// 🔄 ACTUALISER PRIX
 if ($action == 'refresh_price' && $csrf_ok) {
     $rowid = GETPOST('rowid', 'int');
     $result = htpwatchproducts_refresh_price($db, $rowid, $DEBUG_ERRORS);
@@ -124,7 +123,7 @@ if ($action == 'refresh_price' && $csrf_ok) {
     }
 }
 
-// ❌ SUPPRIMER UN PRODUIT (logique)
+// ❌ SUPPRIMER UN PRODUIT
 if ($action == 'delete_product' && $csrf_ok) {
     $rowid = GETPOST('rowid', 'int');
     if (htpwatchproducts_delete_product($db, $rowid)) {
@@ -136,7 +135,7 @@ if ($action == 'delete_product' && $csrf_ok) {
     }
 }
 
-// 🧪 TESTER PRIX (sans enregistrer)
+// 🧪 TESTER PRIX
 if ($action == 'test_price' && $csrf_ok) {
     $url      = trim(GETPOST('url', 'alpha'));
     $supplier = GETPOST('supplier', 'alpha');
@@ -168,7 +167,7 @@ if ($action == 'test_price' && isset($test_price)) {
     print '</div>';
 }
 
-print '<form method="post" style="margin-bottom:10px;">';
+print '<form method="post" style="margin-bottom:10px;" id="productForm">';
 print '<input type="hidden" name="token" value="'.(function_exists('newToken') ? newToken() : '').'">';
 print '<table class="noborder centpercent">';
 
@@ -188,6 +187,7 @@ print '<td>';
 print '<select name="supplier" required>';
 print '<option value="asialand" '.(GETPOST('supplier','alpha')=='asialand'?'selected':'').'>Asialand</option>';
 print '<option value="acadia" '.(GETPOST('supplier','alpha')=='acadia'?'selected':'').'>Acadia</option>';
+print '<option value="espacepc" '.(GETPOST('supplier','alpha')=='espacepc'?'selected':'').'>EspacePC</option>';
 print '</select>';
 print '</td>';
 print '</tr>';
@@ -195,7 +195,7 @@ print '</tr>';
 print '<tr><td colspan="2" style="padding-top:10px;">';
 print '<input type="submit" name="action" value="test_price" class="button" style="margin-right:10px;">';
 print '<input type="submit" name="action" value="add_product" class="button button-ok">';
-print '<input type="reset" value="Vider" class="button" style="margin-left:10px;">';
+print '<button type="button" class="button" style="margin-left:10px;" onclick="document.getElementById(\'productForm\').reset();">Vider</button>';
 print '</td></tr>';
 
 print '</table>';
@@ -227,7 +227,7 @@ if (empty($products)) {
     print '<th>Fournisseur</th>';
     print '<th>URL</th>';
     print '<th>Prix HT</th>';
-    print '<th style="text-align:center;">Variation</th>';  // ✅ NOUVELLE COLONNE
+    print '<th style="text-align:center;">Variation</th>';
     print '<th>Dernière MAJ</th>';
     print '<th style="text-align:center;">Actions</th>';
     print '<th style="text-align:center;">Suppr.</th>';
@@ -236,11 +236,16 @@ if (empty($products)) {
     foreach ($products as $prod) {
         $price_display = htpwatchproducts_format_price($prod->last_price);
         $last_check_display = $prod->last_check ? dol_print_date(strtotime($prod->last_check), 'dayhour') : '<span style="color:#999;">–</span>';
-        $supplier_badge = $prod->supplier == 'asialand' ? 
-            '<span style="background:#007bff;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">Asialand</span>' : 
-            '<span style="background:#28a745;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">Acadia</span>';
         
-        // ✅ CALCUL VARIATION
+        // ✅ Badge fournisseur pour les 3 fournisseurs
+        if ($prod->supplier == 'asialand') {
+            $supplier_badge = '<span style="background:#007bff;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">Asialand</span>';
+        } elseif ($prod->supplier == 'acadia') {
+            $supplier_badge = '<span style="background:#28a745;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">Acadia</span>';
+        } else {
+            $supplier_badge = '<span style="background:#6f42c1;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">EspacePC</span>';
+        }
+        
         $variation = get_price_variation($prod->price_history);
         
         print '<tr class="oddeven">';
@@ -249,10 +254,7 @@ if (empty($products)) {
         $url_short = strlen($prod->url) > 50 ? substr($prod->url, 0, 47).'...' : $prod->url;
         print '<td><a href="'.dol_escape_htmltag($prod->url).'" target="_blank" title="'.dol_escape_htmltag($prod->url).'">'.dol_escape_htmltag($url_short).'</a></td>';
         print '<td style="text-align:right;font-weight:500;">'.$price_display.'</td>';
-        
-        // ✅ COLONNE VARIATION
         print '<td style="text-align:center;font-size:18px;" title="'.$variation['text'].'"><span style="color:'.$variation['color'].';">'.$variation['icon'].'</span></td>';
-        
         print '<td style="text-align:center;">'.$last_check_display.'</td>';
         print '<td style="text-align:center;">';
         print '<form method="post" style="display:inline;">';
