@@ -42,9 +42,9 @@ if ($action == 'save') {
     
     // ✅ INGRAM MICRO - Champs spécifiques
     if ($type == 'ingrammicro') {
-        dolibarr_set_const($db, 'HTP_'.$type.'_CLIENT_ID', $_POST['client_id'] ?? '', 'chaine', 0, '', $conf->entity);
-        dolibarr_set_const($db, 'HTP_'.$type.'_CLIENT_SECRET', $_POST['client_secret'] ?? '', 'chaine', 0, '', $conf->entity);
-        dolibarr_set_const($db, 'HTP_'.$type.'_CUSTOMER_NUMBER', $_POST['customer_number'] ?? '', 'chaine', 0, '', $conf->entity);
+        dolibarr_set_const($db, 'HTP_INGRAMMICRO_CLIENT_ID', $_POST['client_id'] ?? '', 'chaine', 0, '', $conf->entity);
+        dolibarr_set_const($db, 'HTP_INGRAMMICRO_CLIENT_SECRET', $_POST['client_secret'] ?? '', 'chaine', 0, '', $conf->entity);
+        dolibarr_set_const($db, 'HTP_INGRAMMICRO_CUSTOMER_NUMBER', $_POST['customer_number'] ?? '', 'chaine', 0, '', $conf->entity);
     }
     // ✅ AUTRES FOURNISSEURS - Champs classiques
     else {
