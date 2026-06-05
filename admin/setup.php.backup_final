@@ -250,9 +250,9 @@ if ($action == 'test') {
    ========================= */
 function display_row_ingram($name, $type) {
     global $conf;
-    $client_id = $conf->global->HTP_INGRAMMICRO_CLIENT_ID ?? '';
-    $client_secret = $conf->global->HTP_INGRAMMICRO_CLIENT_SECRET ?? '';
-    $customer_number = $conf->global->HTP_INGRAMMICRO_CUSTOMER_NUMBER ?? '';
+    $client_id = $conf->global->{'HTP_'.$type.'_CLIENT_ID'} ?? '';
+    $client_secret = $conf->global->{'HTP_'.$type.'_CLIENT_SECRET'} ?? '';
+    $customer_number = $conf->global->{'HTP_'.$type.'_CUSTOMER_NUMBER'} ?? '';
     
     print '<form method="post">';
     print '<input type="hidden" name="token" value="'.(function_exists('newToken') ? newToken() : '').'">';
