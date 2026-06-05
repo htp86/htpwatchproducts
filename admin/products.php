@@ -3,13 +3,12 @@
 // HTPWatchProducts - Page de gestion des produits surveillés
 // Dolibarr 23.0.2 - NAS Synology DS418
 // ==================================================================
-// Version: 20260522 Build: 2500
+// Version: 20260605 Build: 2600
 // Fichier: /volume1/web/dolibarr_test/htdocs/custom/htpwatchproducts/admin/products.php
 // ==================================================================
-
-$PATHFILE = '/volume1/web/dolibarr_test/htdocs/custom/htpwatchproducts/admin/products.php';
-$VERSION  = '20260522';
-$BUILD    = '1709';
+$PATHFILE = __FILE__;
+$VERSION  = '20260605';
+$BUILD    = '1620';
 $DEBUG_LIGHT  = true;
 $DEBUG_ERRORS = false;
 $DEBUG_DEV    = false;
@@ -40,7 +39,7 @@ if ($DEBUG_LIGHT) {
     print '🔍 HTPWatchProducts';
     print ' | Version '.$VERSION;
     print ' | Build '.$BUILD;
-    print ' | '.htmlspecialchars($PATHFILE);
+    print ' | '.htmlspecialchars(basename($PATHFILE));
     print ' | User: '.(isset($user) && isset($user->login) ? $user->login : 'NO_USER');
     print '</div><div style="height:30px;"></div>';
 }
@@ -52,13 +51,19 @@ llxHeader('', 'HTP Watch Products - Produits surveillés');
 // =================================================================
 $action = GETPOST('action', 'alpha');
 $token  = GETPOST('token', 'alpha');
-
 $message = '';
 $message_type = '';
 $test_price = null;
 $test_result = null;
-
 $csrf_ok = (!empty($token) && $token === ($_SESSION['newtoken'] ?? ''));
+
+// Récupérer message de session (après redirection PRG)
+if (isset($_SESSION['htp_message'])) {
+    $message = $_SESSION['htp_message'];
+    $message_type = $_SESSION['htp_message_type'] ?? 'success';
+    unset($_SESSION['htp_message']);
+    unset($_SESSION['htp_message_type']);
+}
 
 // =================================================================
 // 📊 FONCTION : CALCUL VARIATION PRIX
@@ -67,10 +72,12 @@ function get_price_variation($price_history_json) {
     if (empty($price_history_json)) {
         return ['icon' => '–', 'color' => '#999', 'text' => 'Nouveau'];
     }
+    
     $history = json_decode($price_history_json, true);
     if (!is_array($history) || count($history) < 2) {
         return ['icon' => '=', 'color' => '#999', 'text' => 'Premier prix'];
     }
+    
     $last_price = $history[count($history) - 1]['price'];
     $prev_price = $history[count($history) - 2]['price'];
     
@@ -96,59 +103,155 @@ if ($action == 'add_product' && $csrf_ok) {
     if ($rowid > 0) {
         $result = htpwatchproducts_refresh_price($db, $rowid, false);
         if ($result['success']) {
-            $message = '✅ Produit "'.$label.'" ajouté avec succès (ID: '.$rowid.') - Prix: '.$result['price'].' €';
+            $_SESSION['htp_message'] = '✅ Produit "'.$label.'" ajouté avec succès (ID: '.$rowid.') - Prix: '.$result['price'].' €';
         } else {
-            $message = '✅ Produit ajouté mais prix non récupéré : '.$result['message'];
+            $_SESSION['htp_message'] = '✅ Produit ajouté mais prix non récupéré : '.$result['message'];
         }
-        $message_type = 'success';
+        $_SESSION['htp_message_type'] = 'success';
     } elseif ($rowid == -2) {
-        $message = '❌ URL invalide';
-        $message_type = 'error';
+        $_SESSION['htp_message'] = '❌ URL invalide';
+        $_SESSION['htp_message_type'] = 'error';
     } else {
-        $message = '❌ Erreur ajout (label/URL/supplier vides ou SQL)';
-        $message_type = 'error';
+        $_SESSION['htp_message'] = '❌ Erreur ajout (label/URL/supplier vides ou SQL)';
+        $_SESSION['htp_message_type'] = 'error';
     }
+    
+    // Pattern PRG : Redirection après POST
+    header('Location: '.$_SERVER['PHP_SELF']);
 }
 
-// 🔄 ACTUALISER PRIX
+// 🔄 ACTUALISER UN PRIX
 if ($action == 'refresh_price' && $csrf_ok) {
     $rowid = GETPOST('rowid', 'int');
     $result = htpwatchproducts_refresh_price($db, $rowid, $DEBUG_ERRORS);
+    
     if ($result['success']) {
-        $message = '✅ Prix actualisé : '.htpwatchproducts_format_price($result['price']);
-        $message_type = 'success';
+        $_SESSION['htp_message'] = '✅ Prix actualisé : '.htpwatchproducts_format_price($result['price']);
+        $_SESSION['htp_message_type'] = 'success';
     } else {
-        $message = '❌ '.$result['message'];
-        $message_type = 'error';
+        $_SESSION['htp_message'] = '❌ '.$result['message'];
+        $_SESSION['htp_message_type'] = 'error';
     }
+    
+    // Pattern PRG : Redirection après POST
+    header('Location: '.$_SERVER['PHP_SELF']);
+}
+
+// 🔄 ACTUALISER TOUS LES PRIX (avec progression)
+if ($action == 'refresh_all') {
+    if (!$csrf_ok) {
+        $_SESSION['htp_message'] = '❌ Erreur de token CSRF';
+        $_SESSION['htp_message_type'] = 'error';
+        header('Location: '.$_SERVER['PHP_SELF']);
+        // exit; supprimé pour PRG
+    }
+    
+    $products = htpwatchproducts_list_products($db);
+    $total = count($products);
+    $count_success = 0;
+    $errors = 0;
+    
+    // Affichage progression
+    print '<div style="background:#e7f3ff;padding:20px;margin:10px 0;border-radius:5px;">';
+    print '<h3>🔄 Actualisation en cours...</h3>';
+    print '<div style="background:#fff;border:2px solid #007bff;border-radius:5px;height:40px;position:relative;margin:15px 0;overflow:hidden;">';
+    print '<div id="progress-bar" style="background:linear-gradient(90deg, #007bff 0%, #0056b3 100%);height:100%;width:0%;transition:width 0.3s;"></div>';
+    print '<div id="progress-text" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-weight:bold;color:#000;font-size:16px;">0/'.$total.'</div>';
+    print '</div>';
+    print '<div id="progress-details" style="font-size:13px;color:#333;max-height:300px;overflow-y:auto;">';
+    print '</div>';
+    print '</div>';
+    
+    // Script JavaScript pour mise à jour progression
+    print '<script>
+    var total = '.$total.';
+    var current = 0;
+    function updateProgress(productName, success, price) {
+        current++;
+        var percent = (current/total)*100;
+        document.getElementById("progress-bar").style.width = percent+"%";
+        document.getElementById("progress-text").textContent = current+"/"+total;
+        var status = success ? "✅" : "❌";
+        var priceText = success ? " - "+price+" €" : "";
+        var div = document.createElement("div");
+        div.style.padding = "5px";
+        div.style.borderBottom = "1px solid #ddd";
+        div.innerHTML = status+" <b>"+current+"/"+total+"</b> "+productName+priceText;
+        document.getElementById("progress-details").appendChild(div);
+        document.getElementById("progress-details").scrollTop = document.getElementById("progress-details").scrollHeight;
+    }
+    </script>';
+    
+    flush(); ob_flush();
+    
+    foreach ($products as $prod) {
+        $result = htpwatchproducts_refresh_price($db, $prod->rowid, false);
+        
+        if ($result['success']) {
+            $count_success++;
+            $price = $result['price'];
+            $success_str = 'true';
+        } else {
+            $errors++;
+            $price = '0';
+            $success_str = 'false';
+        }
+        
+        // Mise à jour JavaScript
+        print '<script>updateProgress("'.addslashes($prod->label).'", '.$success_str.', "'.$price.'");</script>';
+        flush(); ob_flush();
+        
+        usleep(200000); // 200ms entre chaque produit
+    }
+    
+    // Message final
+    $_SESSION['htp_message'] = "✅ Actualisation terminée : $count_success succès, $errors erreur(s) sur $total produits";
+    $_SESSION['htp_message_type'] = ($errors > 0) ? 'warning' : 'success';
+    
+    print '<div style="text-align:center;margin-top:20px;">';
+    print '<a href="'.$_SERVER['PHP_SELF'].'" class="button button-ok" style="font-size:16px;padding:10px 20px;">← Retour aux produits</a>';
+    print '</div>';
+    
 }
 
 // ❌ SUPPRIMER UN PRODUIT
 if ($action == 'delete_product' && $csrf_ok) {
     $rowid = GETPOST('rowid', 'int');
     if (htpwatchproducts_delete_product($db, $rowid)) {
-        $message = '✅ Produit désactivé (suppression logique)';
-        $message_type = 'success';
+        $_SESSION['htp_message'] = '✅ Produit désactivé (suppression logique)';
+        $_SESSION['htp_message_type'] = 'success';
     } else {
-        $message = '❌ Erreur lors de la suppression';
-        $message_type = 'error';
+        $_SESSION['htp_message'] = '❌ Erreur lors de la suppression';
+        $_SESSION['htp_message_type'] = 'error';
     }
+    
+    // Pattern PRG : Redirection après POST
+    header('Location: '.$_SERVER['PHP_SELF']);
 }
 
 // 🧪 TESTER PRIX
 if ($action == 'test_price' && $csrf_ok) {
     $url      = trim(GETPOST('url', 'alpha'));
     $supplier = GETPOST('supplier', 'alpha');
-    $login    = $conf->global->{'HTP_'.$supplier.'_LOGIN'} ?? '';
-    $password = $conf->global->{'HTP_'.$supplier.'_PASSWORD'} ?? '';
-    $login_url = $conf->global->{'HTP_'.$supplier.'_URL'} ?? '';
     
-    if ($url && $login && $password && $login_url) {
-        $test_result = _htpwatchproducts_scrape_price($url, $supplier, $login, $password, $login_url, $DEBUG_ERRORS);
+    // ✅ INGRAM MICRO - Test via API OAuth2
+    if ($supplier == 'ingrammicro') {
+        $test_result = htpwatchproducts_scrape_ingram($url, $db, $DEBUG_ERRORS);
         $test_price = $test_result['success'] ? htpwatchproducts_format_price($test_result['price']) : '❌ '.$test_result['message'];
-    } else {
-        $test_price = '❌ Config fournisseur manquante (vérifiez Setup)';
-        $test_result = ['success' => false];
+    }
+    // ✅ AUTRES FOURNISSEURS - Scraping classique
+    else {
+        $login    = $conf->global->{'HTP_'.$supplier.'_LOGIN'} ?? '';
+        $password = $conf->global->{'HTP_'.$supplier.'_PASSWORD'} ?? '';
+        $login_url = $conf->global->{'HTP_'.$supplier.'_URL'} ?? '';
+        
+        if ($url && $login && $password && $login_url) {
+            $test_result = _htpwatchproducts_scrape_price($url, $supplier, $login, $password, $login_url, $DEBUG_ERRORS);
+            $test_price = $test_result['success'] ? htpwatchproducts_format_price($test_result['price']) : '❌ '.$test_result['message'];
+        } else {
+            $test_price = '❌ Config fournisseur manquante (vérifiez Setup)';
+            $test_result = ['success' => false];
+        }
     }
 }
 
@@ -170,17 +273,14 @@ if ($action == 'test_price' && isset($test_price)) {
 print '<form method="post" style="margin-bottom:10px;" id="productForm">';
 print '<input type="hidden" name="token" value="'.(function_exists('newToken') ? newToken() : '').'">';
 print '<table class="noborder centpercent">';
-
 print '<tr class="oddeven">';
 print '<td style="width:120px;"><b>Nom produit</b></td>';
 print '<td><input type="text" name="label" size="40" value="'.dol_escape_htmltag(GETPOST('label','alpha')).'" placeholder="Ex: RTX 5060 8Go" required></td>';
 print '</tr>';
-
 print '<tr class="oddeven">';
 print '<td><b>URL produit</b></td>';
 print '<td><input type="url" name="url" size="80" value="'.dol_escape_htmltag(GETPOST('url','alpha')).'" placeholder="https://..." required></td>';
 print '</tr>';
-
 print '<tr class="oddeven">';
 print '<td><b>Fournisseur</b></td>';
 print '<td>';
@@ -188,16 +288,15 @@ print '<select name="supplier" required>';
 print '<option value="asialand" '.(GETPOST('supplier','alpha')=='asialand'?'selected':'').'>Asialand</option>';
 print '<option value="acadia" '.(GETPOST('supplier','alpha')=='acadia'?'selected':'').'>Acadia</option>';
 print '<option value="espacepc" '.(GETPOST('supplier','alpha')=='espacepc'?'selected':'').'>EspacePC</option>';
+print '<option value="ingrammicro" '.(GETPOST('supplier','alpha')=='ingrammicro'?'selected':'').'>Ingram Micro</option>';
 print '</select>';
 print '</td>';
 print '</tr>';
-
 print '<tr><td colspan="2" style="padding-top:10px;">';
 print '<input type="submit" name="action" value="test_price" class="button" style="margin-right:10px;">';
 print '<input type="submit" name="action" value="add_product" class="button button-ok">';
 print '<button type="button" class="button" style="margin-left:10px;" onclick="document.getElementById(\'productForm\').reset();">Vider</button>';
 print '</td></tr>';
-
 print '</table>';
 print '</form>';
 print '</div>';
@@ -206,11 +305,26 @@ print '</div>';
 // 📦 TABLEAU "PRODUITS SURVEILLÉS"
 // =================================================================
 print '<div style="background:#fff;padding:15px;margin:10px 0;border:1px solid #ddd;border-radius:4px;">';
-print '<h3 style="margin-top:0;">📦 Produits surveillés</h3>';
+print '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">';
+print '<h3 style="margin:0;">📦 Produits surveillés</h3>';
+
+// Bouton Rafraîchir tout
+$products_count = count(htpwatchproducts_list_products($db));
+if ($products_count > 0) {
+    print '<form method="post" style="display:inline;">';
+    print '<input type="hidden" name="token" value="'.(function_exists('newToken') ? newToken() : '').'">';
+    print '<input type="hidden" name="action" value="refresh_all">';
+    print '<button type="submit" class="button button-small" title="Actualiser tous les prix" style="background:#28a745;color:#fff;border:none;padding:8px 15px;border-radius:3px;cursor:pointer;" onmouseover="this.style.background=\'#218838\'" onmouseout="this.style.background=\'#28a745\'">';
+    print '🔄 Tout actualiser ('.$products_count.')';
+    print '</button>';
+    print '</form>';
+}
+
+print '</div>';
 
 if ($message) {
-    $bg_color = ($message_type == 'success') ? '#d4edda' : '#f8d7da';
-    $text_color = ($message_type == 'success') ? '#155724' : '#721c24';
+    $bg_color = ($message_type == 'success') ? '#d4edda' : (($message_type == 'warning') ? '#fff3cd' : '#f8d7da');
+    $text_color = ($message_type == 'success') ? '#155724' : (($message_type == 'warning') ? '#856404' : '#721c24');
     print '<div style="background:'.$bg_color.';color:'.$text_color.';padding:10px;margin-bottom:15px;border-radius:3px;">';
     print $message;
     print '</div>';
@@ -237,13 +351,15 @@ if (empty($products)) {
         $price_display = htpwatchproducts_format_price($prod->last_price);
         $last_check_display = $prod->last_check ? dol_print_date(strtotime($prod->last_check), 'dayhour') : '<span style="color:#999;">–</span>';
         
-        // ✅ Badge fournisseur pour les 3 fournisseurs
+        // ✅ Badge fournisseur pour les 4 fournisseurs
         if ($prod->supplier == 'asialand') {
             $supplier_badge = '<span style="background:#007bff;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">Asialand</span>';
         } elseif ($prod->supplier == 'acadia') {
             $supplier_badge = '<span style="background:#28a745;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">Acadia</span>';
-        } else {
+        } elseif ($prod->supplier == 'espacepc') {
             $supplier_badge = '<span style="background:#6f42c1;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">EspacePC</span>';
+        } else {
+            $supplier_badge = '<span style="background:#ff6b35;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">Ingram Micro</span>';
         }
         
         $variation = get_price_variation($prod->price_history);
